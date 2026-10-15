@@ -1,54 +1,82 @@
-# Telegram-бот статистики CarGoRuqsat
+# Бот статистики CarGoRuqsat (FastAPI + Telegram)
 
-Бот парсит страницу https://cgr.qoldau.kz/ru/information/stat (HTML формируется на сервере) и отвечает статистикой по командам.
+Парсит страницу https://cgr.qoldau.kz/ru/information/stat, отвечает статистикой в Telegram и отдаёт её по HTTP API в JSON. Работает под uvicorn; бот запускается внутри FastAPI (webhook или long polling).
 
-## Установка
+## Структура
+```
+app/
+  main.py              FastAPI, lifespan: запуск бота (webhook / polling), маршрут webhook
+  config.py            настройки (pydantic-settings, переменные окружения / .env)
+  api/routes.py        GET /health, /api/stats, /api/posts, /api/posts/{name}
+  bot/application.py   сборка python-telegram-bot Application
+  bot/handlers/        commands.py, callbacks.py, inline.py, text.py, common.py
+  bot/keyboards.py     инлайн-клавиатуры
+  bot/formatters.py    тексты ответов (HTML)
+  services/parser.py   разбор HTML страницы
+  services/cache.py    кэш: Redis (single-flight, устаревшие данные) или память
+  services/matching.py нечёткий поиск пунктов пропуска
+tests/                 pytest: поиск, API, кэш
+```
+
+## Запуск в Docker (рекомендуется)
+```bash
+cp .env.example .env      # впишите TELEGRAM_BOT_TOKEN
+chmod 600 .env
+docker compose up -d --build
+docker compose ps         # оба контейнера должны быть healthy
+curl http://127.0.0.1:8000/health
+docker compose logs -f bot
+```
+Контейнеры: `bot` (uvicorn, порт `127.0.0.1:8000`, непривилегированный пользователь) и `redis` (redis:7-alpine, AOF на томе `redis-data`, порт наружу не публикуется).
+Одновременно получать обновления может только один экземпляр бота — перед запуском остановите другие копии.
+
+## Локальный запуск без Docker
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-export TELEGRAM_BOT_TOKEN="123456:ABC..."   # токен от @BotFather; не добавляйте его в репозиторий
-python bot.py
+export TELEGRAM_BOT_TOKEN="123456:ABC..."   # не добавляйте токен в репозиторий
+export REDIS_URL=redis://localhost:6379/0   # необязательно
+uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
-
-## Запуск в Docker (с Redis)
-```bash
-cp .env.example .env        # впишите TELEGRAM_BOT_TOKEN
-docker compose up -d --build
-docker compose logs -f bot
-```
-Будут запущены два контейнера: `bot` (сам бот, работает от непривилегированного пользователя) и `redis` (redis:7-alpine с AOF-сохранением на томе `redis-data`; порт наружу не публикуется). Бот стартует только после того, как Redis пройдёт проверку здоровья.
-
-Остановка: `docker compose down` (данные Redis сохраняются в томе; `docker compose down -v` удалит и их).
 
 ## Переменные окружения
 | Переменная | По умолчанию | Описание |
 |---|---|---|
-| `TELEGRAM_BOT_TOKEN` | — | токен бота от @BotFather (обязательно) |
-| `REDIS_URL` | не задан | адрес Redis, например `redis://redis:6379/0`; если не задан или Redis недоступен, используется кэш в памяти |
-| `CACHE_TTL` | `300` | время жизни кэша в секундах |
-| `CACHE_LOG_LEVEL` | `INFO` | `DEBUG` — писать в лог попадания/промахи кэша |
+| `TELEGRAM_BOT_TOKEN` | — | токен от @BotFather; без него работает только HTTP API |
+| `WEBHOOK_URL` | пусто | публичный HTTPS-адрес (например `https://bot.example.com`); если задан — webhook на `/telegram/webhook/{WEBHOOK_SECRET}`, иначе long polling |
+| `WEBHOOK_SECRET` | случайный | секрет в пути webhook и в заголовке `X-Telegram-Bot-Api-Secret-Token` |
+| `REDIS_URL` | пусто | адрес Redis; без него или при недоступности Redis — кэш в памяти |
+| `CACHE_TTL` | `300` | время жизни кэша, сек |
+| `CACHE_LOG_LEVEL` | `INFO` | `DEBUG` — логировать попадания/промахи кэша |
+| `LOG_LEVEL` | `INFO` | уровень логов |
+| `RUN_BOT` | `true` | `false` — запустить только API |
+
+## HTTP API
+- `GET /health` — `{"status":"ok","bot":"polling|webhook|disabled","redis":"ok|unavailable"}`
+- `GET /api/stats` — сводка (пользователи, бронирования, платежи по годам, реестр)
+- `GET /api/posts` — все пункты пропуска: сегодня и сумма свободных мест
+- `GET /api/posts/{name}` — один пункт (нечёткий поиск, как в боте); 404 с подсказками, если не найден
+- `/docs` — Swagger UI
 
 ## Кэширование
-- Разобранные данные страницы хранятся в Redis в виде JSON (ключ `cgr:stat:data` с TTL = `CACHE_TTL`).
-- Короткая блокировка `cgr:stat:lock` не даёт нескольким запросам одновременно скачивать сайт: остальные ждут, пока первый заполнит кэш.
-- Последние успешные данные лежат в ключе `cgr:stat:stale` без TTL. Если сайт недоступен, бот отдаёт их и предупреждает в ответе, что данные могут быть устаревшими.
-- Без Redis всё то же самое работает в памяти процесса.
+Данные хранятся в Redis как JSON (`cgr:stat:data`, TTL = `CACHE_TTL`). Блокировка `cgr:stat:lock` не даёт скачивать сайт параллельно. Последние успешные данные лежат в `cgr:stat:stale` без TTL: если сайт недоступен, бот отдаёт их с пометкой, что данные могут быть устаревшими.
 
-## Команды
-- `/start`, `/help` – справка
-- `/stats` – сводка: зарегистрированные пользователи (+за 7 дней), бронирования и пользователи с пропусками (+за последний месяц), оплата в бюджет по годам, счётчики реестра
-- `/posts` – свободные места на всех пунктах пропуска (на сегодня и всего по открытым дням, 1 МРП / 100 МРП)
-- `/post <название>` – один пункт пропуска на ближайшие 14 дней, поиск по неточному названию (например, `/post хоргос`)
+## Поиск и инлайн-режим
+Поиск понимает части названия, опечатки, латиницу и английскую раскладку (`ljcnsr` → «достык»). Обычный текст в личном чате = `/post <текст>`.
+Инлайн-режим (`@имя_бота хоргос` в любом чате) включается только вручную в @BotFather: `/setinline` → выбрать бота → задать подсказку. При старте бот пишет в лог предупреждение, если он выключен.
 
-Данные со страницы кэшируются на 5 минут.
-
-## Только парсер
+## Тесты
 ```bash
-python parser.py            # живая страница, вывод в JSON
-python parser.py stat.html  # локальная копия
-python parser.py --full     # все дни по каждому пункту пропуска
+pip install -r requirements.txt -r requirements-dev.txt
+STAT_HTML=/путь/к/stat.html pytest -q tests
 ```
 
-## Примечания
-- Загруженность постов берётся из всплывающих подсказок каждого дня (атрибут `title`: свободные места за 1 и 100 МРП) и CSS-класса `zag-level-N` (уровень загрузки как есть).
-- Суммы оплаты в бюджет по размеру платежа (1/20/100 МРП) доступны только через POST-форму фильтра на сайте, которой нужна сессия с защитой от подделки запросов; страница по умолчанию показывает общую сумму.
+## Парсер отдельно
+```bash
+python -m app.services.parser            # живая страница
+python -m app.services.parser stat.html  # локальная копия
+```
+
+## Ограничения
+- Суммы оплаты по размеру платежа (1/20/100 МРП) доступны только через POST-форму сайта с защитой от подделки запросов; бот показывает общую сумму.
+- Свободные места сайт показывает только за 1 и 100 МРП.

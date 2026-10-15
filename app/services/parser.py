@@ -1,16 +1,11 @@
 """Парсер страницы https://cgr.qoldau.kz/ru/information/stat (server-rendered HTML)."""
-import json, logging, os, re, sys, threading, time, uuid
+import json, re, sys
 from datetime import datetime, timezone, timedelta
 import requests
 from bs4 import BeautifulSoup
 
-try:
-    import redis
-except ImportError:  # redis is optional
-    redis = None
 
 URL = "https://cgr.qoldau.kz/ru/information/stat"
-_cache = {"t": 0.0, "data": None}
 KZ_TZ = timezone(timedelta(hours=5))
 
 
@@ -114,134 +109,15 @@ def parse(html):
     return out
 
 
-log = logging.getLogger("cgr.cache")
-CACHE_TTL = int(os.environ.get("CACHE_TTL", "300"))
-KEY, STALE_KEY, LOCK_KEY = "cgr:stat:data", "cgr:stat:stale", "cgr:stat:lock"
-LOCK_TTL = 20  # seconds
-_redis = {"client": None, "url": None}
-_mem_lock = threading.Lock()
-
-
-def _get_redis():
-    url = os.environ.get("REDIS_URL")
-    if not url or redis is None:
-        return None
-    try:
-        if _redis["client"] is None or _redis["url"] != url:
-            _redis["client"] = redis.Redis.from_url(url, socket_timeout=3, socket_connect_timeout=3,
-                                                     decode_responses=True)
-            _redis["url"] = url
-        _redis["client"].ping()
-        return _redis["client"]
-    except Exception as e:
-        log.warning("Redis unavailable (%s), using in-memory cache", e)
-        return None
-
-
-def _download():
-    r = requests.get(URL, timeout=30, headers={"User-Agent": "Mozilla/5.0 cgr-stat-bot"})
+def download(url=URL, timeout=30):
+    r = requests.get(url, timeout=timeout, headers={"User-Agent": "Mozilla/5.0 cgr-stat-bot"})
     r.raise_for_status()
     return parse(r.text)
 
 
-def _with_flag(data, stale):
-    d = dict(data)
-    d["stale"] = stale
-    return d
-
-
-def _fetch_memory(force):
-    if not force and _cache["data"] and time.time() - _cache["t"] < CACHE_TTL:
-        log.debug("memory cache hit")
-        return _with_flag(_cache["data"], False)
-    with _mem_lock:  # single-flight within the process
-        if not force and _cache["data"] and time.time() - _cache["t"] < CACHE_TTL:
-            log.debug("memory cache hit (after lock)")
-            return _with_flag(_cache["data"], False)
-        log.debug("memory cache miss, fetching site")
-        try:
-            data = _download()
-        except Exception:
-            if _cache["data"]:
-                log.warning("site unavailable, serving stale in-memory data", exc_info=True)
-                return _with_flag(_cache["data"], True)
-            raise
-        _cache["data"], _cache["t"] = data, time.time()
-        return _with_flag(data, False)
-
-
-def _fetch_redis(r, force):
-    if not force:
-        raw = r.get(KEY)
-        if raw:
-            log.debug("redis cache hit")
-            return _with_flag(json.loads(raw), False)
-    log.debug("redis cache miss")
-    token = uuid.uuid4().hex
-    got = r.set(LOCK_KEY, token, nx=True, ex=LOCK_TTL)
-    if not got:
-        # someone else is fetching: wait for the result
-        deadline = time.time() + LOCK_TTL
-        while time.time() < deadline:
-            time.sleep(0.3)
-            raw = r.get(KEY)
-            if raw:
-                log.debug("redis cache filled by another worker")
-                return _with_flag(json.loads(raw), False)
-            if not r.exists(LOCK_KEY):
-                break
-        log.debug("lock wait expired, fetching ourselves")
-    try:
-        try:
-            data = _download()
-        except Exception:
-            raw = r.get(STALE_KEY)
-            if raw:
-                log.warning("site unavailable, serving stale data from redis", exc_info=True)
-                return _with_flag(json.loads(raw), True)
-            raise
-        payload = json.dumps(data, ensure_ascii=False)
-        pipe = r.pipeline()
-        pipe.set(KEY, payload, ex=CACHE_TTL)
-        pipe.set(STALE_KEY, payload)  # last good data, no TTL
-        pipe.execute()
-        _cache["data"], _cache["t"] = data, time.time()
-        return _with_flag(data, False)
-    finally:
-        # release only our own lock
-        r.eval("if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) end return 0",
-               1, LOCK_KEY, token)
-
-
-def _fix_keys(d):
-    """JSON turns int dict keys into strings; restore them."""
-    for p in d.get("posts", []):
-        p["free_total"] = {int(k): v for k, v in p["free_total"].items()}
-        for day in p["days"] + [p["today"]]:
-            if "free" in day:
-                day["free"] = {int(k): v for k, v in day["free"].items()}
-    return d
-
-
-def fetch(force=False):
-    """Return parsed data; d["stale"] is True when the site was down and old data is served."""
-    r = _get_redis()
-    if r is not None:
-        try:
-            return _fix_keys(_fetch_redis(r, force))
-        except (redis.RedisError, OSError) as e:
-            log.warning("Redis error (%s), falling back to in-memory cache", e)
-    return _fetch_memory(force)
-
-
 if __name__ == "__main__":
-    if len(sys.argv) > 1:
-        d = parse(open(sys.argv[1], encoding="utf-8").read())
-    else:
-        d = fetch()
-    full = "--full" in sys.argv
-    if not full:
+    d = parse(open(sys.argv[1], encoding="utf-8").read()) if len(sys.argv) > 1 and sys.argv[1] != "--full" else download()
+    if "--full" not in sys.argv:
         for p in d["posts"]:
             p["days"] = p["days"][:3]
-    d.pop("stale", None)
     print(json.dumps(d, ensure_ascii=False, indent=1))
