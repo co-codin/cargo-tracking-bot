@@ -5,7 +5,8 @@ from fastapi.testclient import TestClient
 from app.config import settings
 from app.services import cache, parser
 
-HTML = os.environ.get("STAT_HTML", "/workspace/stat.html")
+FIXTURE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "stat.html")
+HTML = os.environ.get("STAT_HTML", FIXTURE)
 
 
 @pytest.fixture()

@@ -25,6 +25,10 @@ async def _post_init(application: Application):
     await application.bot.set_my_commands(COMMANDS)
 
 
+async def _on_error(update, context):
+    log.error("Ошибка при обработке обновления %s", type(update).__name__, exc_info=context.error)
+
+
 def build_application(token: str) -> Application:
     # updater(None) не нужен: для polling используем application.updater, для webhook — process_update
     app = Application.builder().token(token).post_init(_post_init).build()
@@ -33,6 +37,7 @@ def build_application(token: str) -> Application:
     app.add_handler(CallbackQueryHandler(on_callback))
     app.add_handler(InlineQueryHandler(inline_query))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, text_message))
+    app.add_error_handler(_on_error)
     return app
 
 

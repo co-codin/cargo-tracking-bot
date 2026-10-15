@@ -68,7 +68,7 @@ uvicorn app.main:app --host 127.0.0.1 --port 8000
 ## Тесты
 ```bash
 pip install -r requirements.txt -r requirements-dev.txt
-STAT_HTML=/путь/к/stat.html pytest -q tests
+pytest -q tests   # образец страницы: tests/fixtures/stat.html (можно переопределить STAT_HTML)
 ```
 
 ## Парсер отдельно

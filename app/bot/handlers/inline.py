@@ -28,6 +28,7 @@ async def inline_query(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         results.append(InlineQueryResultArticle(
             id=str(pidx(d, p)), title=f"{fl} {p['name']}", description=desc,
             input_message_content=InputTextMessageContent(card_text(d, p), parse_mode=ParseMode.HTML)))
-    await update.inline_query.answer(results, cache_time=60)
+    logging.getLogger("cgr.inline").info("inline query %r -> %d results", q, len(results))
+    await update.inline_query.answer(results, cache_time=60, is_personal=False)
 
 

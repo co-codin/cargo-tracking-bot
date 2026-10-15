@@ -5,7 +5,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app.services import parser as P
 from app.services.matching import resolve, variants
 
-HTML = os.environ.get("STAT_HTML", "/workspace/stat.html")
+FIXTURE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "stat.html")
+HTML = os.environ.get("STAT_HTML", FIXTURE)
 
 
 @pytest.fixture(scope="module")
