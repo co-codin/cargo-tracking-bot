@@ -15,10 +15,14 @@ async def get_data():
 
 async def fail(update, e):
     logging.exception("fetch failed")
+    if update.effective_message is None:
+        return
     await update.effective_message.reply_text("⚠️ Не удалось получить данные с сайта cgr.qoldau.kz. Попробуйте позже.")
 
 
 async def lookup(update: Update, query: str):
+    if update.effective_message is None:
+        return
     try:
         d = await get_data()
     except Exception as e:
@@ -29,7 +33,7 @@ async def lookup(update: Update, query: str):
         return await msg.reply_text(card_text(d, res, corrected), parse_mode=ParseMode.HTML,
                                     reply_markup=card_kb(pidx(d, res)))
     if kind == "many":
-        kb = [[Btn(f"{country(p['country'])[0]} {p['name']}", callback_data=f"p:{pidx(d, p)}")] for p in res]
+        kb = [[Btn(f"{country(p['country'])[0]} {p['name']}"[:64], callback_data=f"p:{pidx(d, p)}")] for p in res]
         return await msg.reply_text("Возможно, вы имели в виду:", reply_markup=InlineKeyboardMarkup(kb))
     await msg.reply_text(f"🤷 Пункт пропуска «{html.escape(query)}» не найден.\n"
                          "Проверьте название или выберите из списка.", parse_mode=ParseMode.HTML,

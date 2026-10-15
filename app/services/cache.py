@@ -13,6 +13,7 @@ _cache = {"t": 0.0, "data": None}
 log = logging.getLogger("cgr.cache")
 KEY, STALE_KEY, LOCK_KEY = "cgr:stat:data", "cgr:stat:stale", "cgr:stat:lock"
 LOCK_TTL = 20  # seconds
+FORCE_MIN_AGE = 45  # «Обновить» идёт на сайт, только если кэшу больше 45 с
 _redis = {"client": None, "url": None}
 _mem_lock = threading.Lock()
 
@@ -44,6 +45,8 @@ def _with_flag(data, stale):
 
 
 def _fetch_memory(force):
+    if force and _cache["data"] and time.time() - _cache["t"] < FORCE_MIN_AGE:
+        return _with_flag(_cache["data"], False)
     if not force and _cache["data"] and time.time() - _cache["t"] < settings.cache_ttl:
         log.debug("memory cache hit")
         return _with_flag(_cache["data"], False)
@@ -64,8 +67,13 @@ def _fetch_memory(force):
 
 
 def _fetch_redis(r, force):
+    raw = r.get(KEY)
+    if force and raw:
+        ttl = r.ttl(KEY)
+        if ttl is not None and ttl > 0 and settings.cache_ttl - ttl < FORCE_MIN_AGE:
+            log.debug("forced refresh ignored: cache is fresh")
+            return _with_flag(json.loads(raw), False)
     if not force:
-        raw = r.get(KEY)
         if raw:
             log.debug("redis cache hit")
             return _with_flag(json.loads(raw), False)

@@ -21,7 +21,9 @@ def short(n, unit=""):
         if abs(n) >= v:
             x = n / v
             s = f"{x:.2f}" if x < 10 else f"{x:.1f}" if x < 100 else f"{x:.0f}"
-            s = s.rstrip("0").rstrip(".").replace(".", ",")
+            if "." in s:
+                s = s.rstrip("0").rstrip(".")
+            s = s.replace(".", ",")
             return f"{s} {w}" + (f" {unit}" if unit else "")
     return fmt(n) + (f" {unit}" if unit else "")
 
@@ -90,7 +92,7 @@ def today_icon(p):
 def render_post(p, updated, stale=False):
     fl, nm = country(p["country"])
     t = p["today"]
-    L = [f"🛃 <b>{html.escape(p['name'])}</b>", f"{fl} {nm}", "", f"<b>Сегодня, {day_label(t)}</b>"]
+    L = [f"🛃 <b>{html.escape(p['name'])}</b>", f"{fl} {html.escape(nm)}", "", f"<b>Сегодня, {day_label(t)}</b>"]
     if t["status"] == "open":
         for k in (1, 100):
             n = free(t, k)
@@ -135,3 +137,33 @@ def card_text(d, p, corrected=False):
     return t
 
 
+
+
+def delta(n):
+    """+5 / −5 / 0 (без «+-»)."""
+    if n is None:
+        return "—"
+    if n < 0:
+        return "▼ −" + fmt(-n)
+    return "▲ +" + fmt(n)
+
+
+def split_chunks(blocks, limit=4096):
+    """Склеивает блоки в сообщения ≤ limit символов, режет только по строкам."""
+    lines = []
+    for b in blocks:
+        lines += b.split("\n")
+    out, cur = [], ""
+    for ln in lines:
+        while len(ln) > limit:  # аварийно: строка длиннее лимита
+            if cur:
+                out.append(cur); cur = ""
+            out.append(ln[:limit]); ln = ln[limit:]
+        cand = ln if not cur else cur + "\n" + ln
+        if len(cand) > limit:
+            out.append(cur); cur = ln
+        else:
+            cur = cand
+    if cur.strip():
+        out.append(cur)
+    return [c for c in out if c.strip()]

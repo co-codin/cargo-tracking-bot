@@ -1,11 +1,20 @@
 """HTTP API: /health и JSON со статистикой."""
 import asyncio
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
+
+from app.services.ratelimit import api_limiter
 
 from app.services import cache, matching
 
 router = APIRouter()
+
+
+def rate_limit(request: Request):
+    ip = request.client.host if request.client else "?"
+    if not api_limiter.allow(ip):
+        raise HTTPException(status_code=429, detail="Слишком много запросов, попробуйте позже")
+
 
 
 async def _data():
@@ -22,7 +31,7 @@ async def health(request: Request):
     return {"status": "ok", "bot": bot, "redis": "ok" if r is not None else "unavailable (memory cache)"}
 
 
-@router.get("/api/stats")
+@router.get("/api/stats", dependencies=[Depends(rate_limit)])
 async def api_stats():
     d = await _data()
     return {k: v for k, v in d.items() if k != "posts"}
@@ -34,14 +43,14 @@ def _post_summary(p):
             "free_total": p["free_total"], "open_days": p["open_days"]}
 
 
-@router.get("/api/posts")
+@router.get("/api/posts", dependencies=[Depends(rate_limit)])
 async def api_posts():
     d = await _data()
     return {"updated_at": d["posts_updated_at"], "stale": d.get("stale", False),
             "posts": [_post_summary(p) for p in d["posts"]]}
 
 
-@router.get("/api/posts/{name}")
+@router.get("/api/posts/{name}", dependencies=[Depends(rate_limit)])
 async def api_post(name: str):
     d = await _data()
     kind, res, corrected = matching.resolve(d["posts"], name)

@@ -54,4 +54,5 @@ def test_cache_stale(monkeypatch):
     def boom():
         raise ConnectionError("down")
     monkeypatch.setattr(cache, "_download", boom)
+    cache._cache["t"] -= 400  # cache expired
     assert cache.fetch(force=True)["stale"] is True

@@ -5,12 +5,14 @@ from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
 
 from app.bot.formatters import *  # noqa: F401,F403
-from app.bot.formatters import COUNTRY_ORDER, country, fmt, footer, free, plural, short, today_icon
+from app.bot.formatters import COUNTRY_ORDER, country, delta, fmt, footer, free, plural, short, split_chunks, today_icon
 from app.bot.keyboards import countries_kb
 from app.bot.handlers.common import fail, get_data, lookup
 
 
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if update.effective_message is None:
+        return
     text = (
         "<b>Бот статистики CarGoRuqsat</b>\n"
         "Данные об очереди на пунктах пропуска с сайта cgr.qoldau.kz.\n\n"
@@ -29,10 +31,12 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "🚫 выходной – пункт не работает, ⏳ – бронирование ещё не открыто.\n"
         "Данные обновляются не чаще раза в 5 минут. Бронировать нужно на сайте, бот только показывает статистику.")
     uname = ctx.bot.username or "имя_бота"
-    await update.message.reply_text(text.replace("@имя_бота", "@" + uname), parse_mode=ParseMode.HTML)
+    await update.effective_message.reply_text(text.replace("@имя_бота", "@" + uname), parse_mode=ParseMode.HTML)
 
 
 async def stats(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if update.effective_message is None:
+        return
     try:
         d = await get_data()
     except Exception as e:
@@ -42,7 +46,7 @@ async def stats(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     def line(title, c):
         if not c:
             return None
-        return f"{title}: <b>{fmt(c['total'])}</b>  ▲ +{fmt(c['delta'])} {per.get(c['period'], c['period'].lower())}"
+        return f"{title}: <b>{fmt(c['total'])}</b>  {delta(c['delta'])} {per.get(c['period'], c['period'].lower())}"
 
     L = ["📊 <b>CarGoRuqsat в цифрах</b>", "", "👥 <b>Пользователи</b>"]
     L += [x for x in (line("Зарегистрировано", d.get("registered_users")),
@@ -61,9 +65,9 @@ async def stats(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         names = {"водителей": "Водители", "владельцев ТС": "Владельцы ТС", "ТС": "Транспорт", "прицепов": "Прицепы"}
         L += ["", "🚛 <b>Реестр</b>"]
         for k, v in d["registry"].items():
-            L.append(f"{names.get(k, k)}: {fmt(v['total'])}  ▲ +{fmt(v['last_7_days'])} за неделю")
+            L.append(f"{names.get(k, k)}: {fmt(v['total'])}  {delta(v['last_7_days'])} за неделю")
     L.append(footer(d["updated_at"], d.get("stale")))
-    await update.message.reply_text("\n".join(L), parse_mode=ParseMode.HTML)
+    await update.effective_message.reply_text("\n".join(L), parse_mode=ParseMode.HTML)
 
 
 async def posts(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -78,30 +82,29 @@ async def posts(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     blocks = ["🛃 <b>Пункты пропуска — сегодня</b>\n🟢 есть места · 🔴 мест нет · ⚪ выходной\nСвободно: 1 МРП / 100 МРП"]
     for c in order:
         fl, nm = country(c)
-        rows = [f"\n{fl} <b>{nm}</b>"]
+        rows = [f"\n{fl} <b>{html.escape(nm)}</b>"]
         for p in groups[c]:
             t = p["today"]
             val = f"{fmt(free(t, 1))} / {fmt(free(t, 100))}" if t["status"] == "open" else "выходной"
-            rows.append(f"{today_icon(p)} {p['name']} — {val}")
+            rows.append(f"{today_icon(p)} {html.escape(p['name'])} — {val}")
         blocks.append("\n".join(rows))
     blocks.append(footer(d["posts_updated_at"], d.get("stale")) + "\nПодробнее: /post &lt;название&gt;")
-    chunk = ""
-    for b in blocks:
-        if len(chunk) + len(b) > 3900:
-            await update.effective_message.reply_text(chunk, parse_mode=ParseMode.HTML)
-            chunk = ""
-        chunk += b + "\n"
-    if chunk:
-        await update.effective_message.reply_text(chunk, parse_mode=ParseMode.HTML)
+    msg = update.effective_message
+    if msg is None:
+        return
+    for chunk in split_chunks(blocks):
+        await msg.reply_text(chunk, parse_mode=ParseMode.HTML)
 
 
 async def post(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if update.effective_message is None:
+        return
     if ctx.args:
         return await lookup(update, " ".join(ctx.args))
     try:
         d = await get_data()
     except Exception as e:
         return await fail(update, e)
-    await update.message.reply_text("🗺 Выберите страну:", reply_markup=countries_kb(d))
+    await update.effective_message.reply_text("🗺 Выберите страну:", reply_markup=countries_kb(d))
 
 

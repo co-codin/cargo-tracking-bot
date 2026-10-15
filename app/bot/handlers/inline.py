@@ -10,7 +10,9 @@ from app.services import matching
 
 
 async def inline_query(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    q = update.inline_query.query.strip()
+    if update.inline_query is None:
+        return
+    q = (update.inline_query.query or "").strip()[:100]
     try:
         d = await get_data()
     except Exception:

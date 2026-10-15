@@ -12,7 +12,12 @@ from app.services import cache
 
 async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     cq = update.callback_query
+    if cq is None:
+        return
     data = cq.data or ""
+    valid = data in ("all", "countries") or data.startswith("c:") or (data[:2] in ("p:", "r:") and data[2:].isdigit())
+    if not valid:
+        return await cq.answer("Кнопка устарела, откройте меню заново")
     try:
         d = await asyncio.to_thread(cache.fetch, data.startswith("r:"))
     except Exception:
@@ -29,7 +34,7 @@ async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             code = data[2:]
             fl, nm = country(code)
             await cq.answer()
-            return await cq.edit_message_text(f"{fl} <b>{nm}</b> — выберите пункт пропуска:\n🟢 есть места сегодня · 🔴 нет · ⚪ выходной",
+            return await cq.edit_message_text(f"{fl} <b>{html.escape(nm)}</b> — выберите пункт пропуска:\n🟢 есть места сегодня · 🔴 нет · ⚪ выходной",
                                               parse_mode=ParseMode.HTML, reply_markup=country_posts_kb(d, code))
         if data[:2] in ("p:", "r:"):
             i = int(data[2:])
@@ -43,6 +48,8 @@ async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     return
                 return await cq.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=card_kb(i))
             await cq.answer()
+            if cq.message is None:
+                return
             return await cq.message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=card_kb(i))
         await cq.answer()
     except Exception as e:
