@@ -7,6 +7,7 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 import parser as cgr
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+logging.getLogger("cgr.cache").setLevel(os.environ.get("CACHE_LOG_LEVEL", "INFO"))
 logging.getLogger("httpx").setLevel(logging.WARNING)  # не писать токен в лог
 
 
@@ -77,8 +78,10 @@ def day_state(day):
     return "мест нет" if a == 0 and b == 0 else f"{fmt(a)} / {fmt(b)}"
 
 
-def footer(ts):
-    return f"\n<i>🕒 Обновлено: {ts} (время KZ) · cgr.qoldau.kz</i>"
+def footer(ts, stale=False):
+    note = ("\n⚠️ <i>Сайт сейчас недоступен — показаны последние сохранённые данные, "
+            "они могут быть устаревшими.</i>") if stale else ""
+    return note + f"\n<i>🕒 Обновлено: {ts} (время KZ) · cgr.qoldau.kz</i>"
 
 
 async def get_data():
@@ -137,7 +140,7 @@ async def stats(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         L += ["", "🚛 <b>Реестр</b>"]
         for k, v in d["registry"].items():
             L.append(f"{names.get(k, k)}: {fmt(v['total'])}  ▲ +{fmt(v['last_7_days'])} за неделю")
-    L.append(footer(d["updated_at"]))
+    L.append(footer(d["updated_at"], d.get("stale")))
     await update.message.reply_text("\n".join(L), parse_mode=ParseMode.HTML)
 
 
@@ -166,7 +169,7 @@ async def posts(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             val = f"{fmt(free(t, 1))} / {fmt(free(t, 100))}" if t["status"] == "open" else "выходной"
             rows.append(f"{today_icon(p)} {p['name']} — {val}")
         blocks.append("\n".join(rows))
-    blocks.append(footer(d["posts_updated_at"]) + "\nПодробнее: /post &lt;название&gt;")
+    blocks.append(footer(d["posts_updated_at"], d.get("stale")) + "\nПодробнее: /post &lt;название&gt;")
     chunk = ""
     for b in blocks:
         if len(chunk) + len(b) > 3900:
@@ -191,7 +194,7 @@ def find_post(posts_, q):
     return names[m[0]] if m else None
 
 
-def render_post(p, updated):
+def render_post(p, updated, stale=False):
     fl, nm = country(p["country"])
     t = p["today"]
     L = [f"🛃 <b>{p['name']}</b>", f"{fl} {nm}", "", f"<b>Сегодня, {day_label(t)}</b>"]
@@ -224,7 +227,7 @@ def render_post(p, updated):
     ft, n = p["free_total"], p["open_days"]
     L += ["", f"Всего: <b>{fmt(ft[1])} / {fmt(ft[100])}</b> мест "
               f"за {n} {plural(n, 'день', 'дня', 'дней')}"]
-    L.append(footer(updated))
+    L.append(footer(updated, stale))
     return "\n".join(L)
 
 
@@ -238,7 +241,7 @@ async def post(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     p = find_post(d["posts"], " ".join(ctx.args))
     if not p:
         return await update.message.reply_text("🤷 Пункт пропуска не найден. Список всех пунктов: /posts")
-    await update.message.reply_text(render_post(p, d["posts_updated_at"]), parse_mode=ParseMode.HTML)
+    await update.message.reply_text(render_post(p, d["posts_updated_at"], d.get("stale")), parse_mode=ParseMode.HTML)
 
 
 def main():
