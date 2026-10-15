@@ -1,30 +1,30 @@
-# CarGoRuqsat stats Telegram bot
+# Telegram-бот статистики CarGoRuqsat
 
-Parses https://cgr.qoldau.kz/ru/information/stat (server-rendered HTML) and answers with statistics on command.
+Бот парсит страницу https://cgr.qoldau.kz/ru/information/stat (HTML формируется на сервере) и отвечает статистикой по командам.
 
-## Setup
+## Установка
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-export TELEGRAM_BOT_TOKEN="123456:ABC..."   # from @BotFather; never commit it
+export TELEGRAM_BOT_TOKEN="123456:ABC..."   # токен от @BotFather; не добавляйте его в репозиторий
 python bot.py
 ```
 
-## Commands
-- `/start`, `/help` – help
-- `/stats` – summary: registered users (+7 days), bookings and users with passes (+last month), budget payments per year, registry counters
-- `/posts` – free slots at every border crossing (today and total over open days, 1 МРП / 100 МРП)
-- `/post <name>` – one crossing with the next 14 days, fuzzy name match (e.g. `/post хоргос`)
+## Команды
+- `/start`, `/help` – справка
+- `/stats` – сводка: зарегистрированные пользователи (+за 7 дней), бронирования и пользователи с пропусками (+за последний месяц), оплата в бюджет по годам, счётчики реестра
+- `/posts` – свободные места на всех пунктах пропуска (на сегодня и всего по открытым дням, 1 МРП / 100 МРП)
+- `/post <название>` – один пункт пропуска на ближайшие 14 дней, поиск по неточному названию (например, `/post хоргос`)
 
-Page fetches are cached for 5 minutes.
+Данные со страницы кэшируются на 5 минут.
 
-## Parser only
+## Только парсер
 ```bash
-python parser.py            # live page, JSON output
-python parser.py stat.html  # local copy
-python parser.py --full     # include all days per crossing
+python parser.py            # живая страница, вывод в JSON
+python parser.py stat.html  # локальная копия
+python parser.py --full     # все дни по каждому пункту пропуска
 ```
 
-## Notes
-- Post load comes from tooltip data on each day square (`title` attribute: free slots for 1 and 100 МРП) and the `zag-level-N` CSS class (raw load level).
-- Per-payment-size (1/20/100 МРП) budget totals are only available via the site's POST filter form, which needs an anti-forgery session; the default page shows all sizes combined.
+## Примечания
+- Загруженность постов берётся из всплывающих подсказок каждого дня (атрибут `title`: свободные места за 1 и 100 МРП) и CSS-класса `zag-level-N` (уровень загрузки как есть).
+- Суммы оплаты в бюджет по размеру платежа (1/20/100 МРП) доступны только через POST-форму фильтра на сайте, которой нужна сессия с защитой от подделки запросов; страница по умолчанию показывает общую сумму.

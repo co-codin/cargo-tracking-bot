@@ -1,4 +1,4 @@
-"""Parser for https://cgr.qoldau.kz/ru/information/stat (server-rendered HTML)."""
+"""Парсер страницы https://cgr.qoldau.kz/ru/information/stat (server-rendered HTML)."""
 import json, re, sys, time
 from datetime import datetime, timezone, timedelta
 import requests
